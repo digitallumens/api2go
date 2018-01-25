@@ -15,6 +15,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"gopkg.in/guregu/null.v2"
+	"io/ioutil"
 )
 
 type requestURLResolver struct {
@@ -218,7 +219,6 @@ type fixtureSource struct {
 
 func (s *fixtureSource) FindAll(req Request) (Responder, error) {
 	var err error
-
 	if _, ok := req.Pagination["custom"]; ok {
 		return &Response{
 			Res: []*Post{},
@@ -258,6 +258,37 @@ func (s *fixtureSource) FindAll(req Request) (Responder, error) {
 
 		fmt.Println("Error casting to int", err)
 		return &Response{}, err
+	}
+	if titleParams, ok := req.QueryParams["title"]; ok {
+		// error case
+		if len(titleParams) > 1 {
+			return nil, NewHTTPError(nil,
+				"title query parameter length > 1. Check comma separation.  Escape Comma with %5c",
+				http.StatusBadRequest)
+		}
+		// good case
+		postsSlice := make([]*Post, 0)
+		if s.pointers {
+			length := len(s.posts)
+			for i := 0; i < length; i++ {
+				if s.posts[strconv.Itoa(i+1)].Title == titleParams[0] {
+					postsSlice = append(postsSlice, s.posts[strconv.Itoa(i+1)])
+					break
+				}
+			}
+		} else {
+			length := len(s.posts)
+			for i := 0; i < length; i++ {
+				if s.posts[strconv.Itoa(i+1)].Title == titleParams[0] {
+					postsSlice = append(postsSlice, s.posts[strconv.Itoa(i+1)])
+					break
+				}
+			}
+		}
+		if len(postsSlice) <= 0 {
+			return nil, NewHTTPError(nil, "Failed to find record with title "+titleParams[0], http.StatusNotFound)
+		}
+		return &Response{Res: postsSlice}, nil
 	}
 
 	if s.pointers {
@@ -465,12 +496,17 @@ var _ = Describe("RestHandler", func() {
 			api *API
 			rec *httptest.ResponseRecorder
 		)
+		const (
+			title1 = "Hello, World!"
+			title2 = "I am NR. 2"
+			title3 = "I am NR. 3"
+		)
 
 		BeforeEach(func() {
 			source = &fixtureSource{map[string]*Post{
 				"1": {
 					ID:    "1",
-					Title: "Hello, World!",
+					Title: title1,
 					Author: &User{
 						ID:   "1",
 						Name: "Dieter",
@@ -480,15 +516,15 @@ var _ = Describe("RestHandler", func() {
 						Value: "This is a stupid post!",
 					}},
 				},
-				"2": {ID: "2", Title: "I am NR. 2"},
-				"3": {ID: "3", Title: "I am NR. 3"},
+				"2": {ID: "2", Title: title2},
+				"3": {ID: "3", Title: title3},
 			}, usePointerResources}
 
 			post1Json = map[string]interface{}{
 				"id":   "1",
 				"type": "posts",
 				"attributes": map[string]interface{}{
-					"title": "Hello, World!",
+					"title": title1,
 					"value": nil,
 				},
 				"relationships": map[string]interface{}{
@@ -546,7 +582,7 @@ var _ = Describe("RestHandler", func() {
 				"id":   "2",
 				"type": "posts",
 				"attributes": map[string]interface{}{
-					"title": "I am NR. 2",
+					"title": title2,
 					"value": nil,
 				},
 				"relationships": map[string]interface{}{
@@ -578,7 +614,7 @@ var _ = Describe("RestHandler", func() {
 				"id":   "3",
 				"type": "posts",
 				"attributes": map[string]interface{}{
-					"title": "I am NR. 3",
+					"title": title3,
 					"value": nil,
 				},
 				"relationships": map[string]interface{}{
@@ -645,6 +681,33 @@ var _ = Describe("RestHandler", func() {
 			Expect(rec.Code).To(Equal(http.StatusOK))
 			expected, err := json.Marshal(map[string]interface{}{
 				"data":     post1Json,
+				"included": post1LinkedJSON,
+			})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(rec.Body.Bytes()).To(MatchJSON(expected))
+		})
+
+		It("GETs collections with Query parameter having bad comma separation", func() {
+			// title1 has comma separated title.  Expect it to be rejected as a query param
+			req, err := http.NewRequest("GET", "/v1/posts?title="+title1, nil)
+			Expect(err).To(BeNil())
+			api.Handler().ServeHTTP(rec, req)
+			bodyBytes, _ := ioutil.ReadAll(rec.Body)
+			if rec.Code != http.StatusOK {
+				GinkgoWriter.Write(bodyBytes)
+				print(GinkgoWriter)
+			}
+			Expect(rec.Code).To(Equal(http.StatusBadRequest))
+		})
+
+		It("GETs collections using title  Query parameter with escaped comma", func() {
+			urlEncodedTitle1 := strings.Replace(title1, ",", "%5c,", -1)
+			req, err := http.NewRequest("GET", "/v1/posts?title="+urlEncodedTitle1, nil)
+			Expect(err).To(BeNil())
+			api.Handler().ServeHTTP(rec, req)
+			Expect(rec.Code).To(Equal(http.StatusOK))
+			expected, err := json.Marshal(map[string]interface{}{
+				"data":     []map[string]interface{}{post1Json},
 				"included": post1LinkedJSON,
 			})
 			Expect(err).ToNot(HaveOccurred())
@@ -1085,7 +1148,10 @@ var _ = Describe("RestHandler", func() {
 			api *API
 			rec *httptest.ResponseRecorder
 		)
-
+		const (
+			title1 = "Hello, World!"
+			title2 = "Hello, from second Post!"
+		)
 		BeforeEach(func() {
 			source = &fixtureSource{map[string]*Post{
 				"1": {ID: "1", Title: "Hello, World!"},
@@ -1196,6 +1262,27 @@ var _ = Describe("RestHandler", func() {
 			Expect(api2goReq.QueryParams).To(Equal(map[string][]string{"sort": {"title", "date"}}))
 		})
 
+		It("Extracts comma separated query parameters as a slice of strings ", func() {
+			req, err := http.NewRequest("GET", "/v0/posts?title="+title1, nil)
+			Expect(err).To(BeNil())
+			c := &APIContext{}
+
+			split := strings.Split(title1, ",")
+			Expect(len(split)).To(Equal(2))
+
+			api2goReq := buildRequest(c, req)
+			Expect(api2goReq.QueryParams).To(Equal(map[string][]string{"title": {split[0], split[1]}}))
+		})
+
+		It("Extracts query parameter with urlencoded escaped comma as one string", func() {
+			urlencoded := strings.Replace(title1, ",", "%5c,", -1)
+			req, err := http.NewRequest("GET", "/v0/posts?title="+urlencoded, nil)
+			Expect(err).To(BeNil())
+			c := &APIContext{}
+
+			api2goReq := buildRequest(c, req)
+			Expect(api2goReq.QueryParams).To(Equal(map[string][]string{"title": {title1}}))
+		})
 		It("Extracts pagination parameters correctly", func() {
 			req, err := http.NewRequest("GET", "/v0/posts?page[volume]=one&page[size]=10", nil)
 			Expect(err).To(BeNil())
