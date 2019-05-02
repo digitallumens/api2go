@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/digitallumens/api2go/jsonapi"
 	"github.com/digitallumens/api2go/routing"
@@ -512,6 +513,62 @@ func (res *resource) handleIndex(c APIContexter, w http.ResponseWriter, r *http.
 		return err
 	}
 
+	// log.Printf("api2go.handleIndex: %#v", response)
+
+	// cache control
+	rsp, ok := response.(*Response)
+	if ok {
+		var maxTimestamp time.Time
+
+		resources := rsp.Res.([]interface{}) // []models.<modelName>
+		if resources != nil {
+			for _, resource := range resources {
+				stamper, ok := resource.(Timestamper)
+				if ok {
+					timestamp, err := stamper.GetTimestamp()
+					if err == nil {
+						if timestamp.After(maxTimestamp) {
+							maxTimestamp = timestamp
+						}
+					}
+				}
+			}
+			ims := r.Header.Get("If-Modified-Since")
+			if ims != "" {
+				imstime, err := time.Parse(time.RFC1123, ims)
+				if err == nil {
+					if !imstime.Before(maxTimestamp) { // TODO is this backwards?
+						// log.Printf("api2go.index IMS 304")
+						writeResult(w, []byte{}, http.StatusNotModified, res.api.ContentType)
+						return nil
+					}
+				}
+				if !maxTimestamp.IsZero() {
+					w.Header().Set("Date", maxTimestamp.UTC().Format(time.RFC1123))
+				}
+			}
+		}
+
+		// etagger, ok := resource.(Etagger)
+		// if ok {
+		// 	etag, err := etagger.GetEtag()
+		// 	if err == nil {
+		// 		reqEtag := r.Header.Get("If-None-Match")
+		// 		if reqEtag != "" {
+		// 			if reqEtag == etag {
+		// 				log.Printf("api2go.read Etag 304")
+		// 				writeResult(w, []byte{}, http.StatusNotModified, res.api.ContentType)
+		// 				return nil
+		// 			}
+		// 		}
+		// 		w.Header().Set("ETag", etag)
+		// 	}
+		// }
+
+	}
+	w.Header().Set("Vary", "Accept, Origin")
+	w.Header().Set("Cache-Control", "private, max-age=60")
+
 	return res.respondWith(response, info, http.StatusOK, w, r)
 }
 
@@ -530,6 +587,49 @@ func (res *resource) handleRead(c APIContexter, w http.ResponseWriter, r *http.R
 		return err
 	}
 
+	// cache control
+	rsp, ok := response.(*Response)
+	if ok {
+		resource := rsp.Res
+		if resource != nil {
+			stamper, ok := resource.(Timestamper)
+			if ok {
+				timestamp, err := stamper.GetTimestamp()
+				if err == nil {
+					ims := r.Header.Get("If-Modified-Since")
+					if ims != "" {
+						imstime, err := time.Parse(time.RFC1123, ims)
+						if err == nil {
+							if !imstime.Before(timestamp) {
+								// log.Printf("api2go.read IMS 304")
+								writeResult(w, []byte{}, http.StatusNotModified, res.api.ContentType)
+								return nil
+							}
+						}
+					}
+					w.Header().Set("Date", timestamp.UTC().Format(time.RFC1123))
+				}
+			}
+			etagger, ok := resource.(Etagger)
+			if ok {
+				etag, err := etagger.GetEtag()
+				if err == nil {
+					reqEtag := r.Header.Get("If-None-Match")
+					if reqEtag != "" {
+						if reqEtag == etag {
+							// log.Printf("api2go.read Etag 304")
+							writeResult(w, []byte{}, http.StatusNotModified, res.api.ContentType)
+							return nil
+						}
+					}
+					w.Header().Set("ETag", etag)
+				}
+			}
+		}
+	}
+	w.Header().Set("Vary", "Accept, Origin")
+	w.Header().Set("Cache-Control", "private, max-age=60")
+
 	return res.respondWith(response, info, http.StatusOK, w, r)
 }
 
@@ -546,6 +646,53 @@ func (res *resource) handleReadRelation(c APIContexter, w http.ResponseWriter, r
 	if err != nil {
 		return err
 	}
+
+	// log.Printf("api2go.readRelation [%#v]", obj)
+
+	// cache control
+	rsp, ok := obj.(*Response)
+	if ok {
+		resource := rsp.Res
+		if resource != nil {
+			stamper, ok := resource.(Timestamper)
+			if ok {
+				timestamp, err := stamper.GetTimestamp()
+				if err == nil {
+					ims := r.Header.Get("If-Modified-Since")
+					if ims != "" {
+						imstime, err := time.Parse(time.RFC1123, ims)
+						if err == nil {
+							if !imstime.Before(timestamp) {
+								// log.Printf("api2go.readRelation IMS 304")
+								writeResult(w, []byte{}, http.StatusNotModified, res.api.ContentType)
+								return nil
+							}
+						}
+					}
+					// log.Printf("api2go.readRelation Date: %s", timestamp.UTC().Format(time.RFC1123))
+					w.Header().Set("Date", timestamp.UTC().Format(time.RFC1123))
+				}
+			}
+			etagger, ok := resource.(Etagger)
+			if ok {
+				etag, err := etagger.GetEtag()
+				if err == nil {
+					reqEtag := r.Header.Get("If-None-Match")
+					if reqEtag != "" {
+						if reqEtag == etag {
+							// log.Printf("api2go.readRelation Etag 304")
+							writeResult(w, []byte{}, http.StatusNotModified, res.api.ContentType)
+							return nil
+						}
+					}
+					// log.Printf("api2go.readRelation ETag: %s", etag)
+					w.Header().Set("ETag", etag)
+				}
+			}
+		}
+	}
+	w.Header().Set("Vary", "Accept, Origin")
+	w.Header().Set("Cache-Control", "private, max-age=60")
 
 	document, err := jsonapi.MarshalToStruct(obj.Result(), info)
 	if err != nil {
