@@ -184,7 +184,7 @@ var _ = Describe("Test return code behavior", func() {
 		It("return accepted and no content", func() {
 			post(SomeData{ID: "accept", Data: "nothing"})
 			Expect(rec.Code).To(Equal(http.StatusAccepted))
-			Expect(rec.Body.String()).To(BeEmpty())
+			Expect(rec.Body.String()).ToNot(BeEmpty())
 		})
 
 		It("does not accept invalid return codes", func() {
@@ -235,7 +235,7 @@ var _ = Describe("Test return code behavior", func() {
 		It("returns 202 Accepted if update is delayed", func() {
 			patch(SomeData{ID: "12345", Data: "delayed"})
 			Expect(rec.Code).To(Equal(http.StatusAccepted))
-			Expect(rec.Body.String()).To(BeEmpty())
+			Expect(rec.Body.String()).ToNot(BeEmpty())
 		})
 
 		It("returns 204 No Content if update was accepted", func() {
@@ -288,7 +288,7 @@ var _ = Describe("Test return code behavior", func() {
 		It("returns 202 accepted if deletion is delayed", func() {
 			delete("202")
 			Expect(rec.Code).To(Equal(http.StatusAccepted))
-			Expect(rec.Body.String()).To(BeEmpty())
+			Expect(rec.Body.String()).ToNot(BeEmpty())
 		})
 
 		It("return 204 No Content if deletion just worked", func() {

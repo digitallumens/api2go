@@ -670,14 +670,12 @@ func (res *resource) handleCreate(c APIContexter, w http.ResponseWriter, r *http
 	}
 
 	// handle 200 status codes
-	switch response.StatusCode() {
-	case http.StatusCreated:
-		return res.respondWith(response, info, http.StatusCreated, w, r)
+	code := response.StatusCode()
+	switch code {
+	case http.StatusCreated, http.StatusAccepted:
+		return res.respondWith(response, info, code, w, r)
 	case http.StatusNoContent:
-		w.WriteHeader(response.StatusCode())
-		return nil
-	case http.StatusAccepted:
-		w.WriteHeader(response.StatusCode())
+		w.WriteHeader(code)
 		return nil
 	default:
 		return fmt.Errorf("invalid status code %d from resource %s for method Create", response.StatusCode(), res.name)
@@ -722,8 +720,9 @@ func (res *resource) handleUpdate(c APIContexter, w http.ResponseWriter, r *http
 		return err
 	}
 
-	switch response.StatusCode() {
-	case http.StatusOK:
+	code := response.StatusCode()
+	switch code {
+	case http.StatusOK, http.StatusAccepted:
 		updated := response.Result()
 		if updated == nil {
 			internalResponse, err := source.FindOne(id, buildRequest(c, r))
@@ -738,10 +737,7 @@ func (res *resource) handleUpdate(c APIContexter, w http.ResponseWriter, r *http
 			response = internalResponse
 		}
 
-		return res.respondWith(response, info, http.StatusOK, w, r)
-	case http.StatusAccepted:
-		w.WriteHeader(http.StatusAccepted)
-		return nil
+		return res.respondWith(response, info, code, w, r)
 	case http.StatusNoContent:
 		w.WriteHeader(http.StatusNoContent)
 		return nil
@@ -984,16 +980,14 @@ func (res *resource) handleDelete(c APIContexter, w http.ResponseWriter, r *http
 		return err
 	}
 
-	switch response.StatusCode() {
-	case http.StatusOK:
+	code := response.StatusCode()
+	switch code {
+	case http.StatusOK, http.StatusAccepted:
 		data := map[string]interface{}{
 			"meta": response.Metadata(),
 		}
 
-		return res.marshalResponse(data, w, http.StatusOK, r)
-	case http.StatusAccepted:
-		w.WriteHeader(http.StatusAccepted)
-		return nil
+		return res.marshalResponse(data, w, code, r)
 	case http.StatusNoContent:
 		w.WriteHeader(http.StatusNoContent)
 		return nil
