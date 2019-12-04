@@ -670,11 +670,12 @@ func (res *resource) handleCreate(c APIContexter, w http.ResponseWriter, r *http
 	}
 
 	// handle 200 status codes
-	switch response.StatusCode() {
+	code := response.StatusCode()
+	switch code {
 	case http.StatusCreated, http.StatusAccepted:
-		return res.respondWith(response, info, response.StatusCode(), w, r)
+		return res.respondWith(response, info, code, w, r)
 	case http.StatusNoContent:
-		w.WriteHeader(response.StatusCode())
+		w.WriteHeader(code)
 		return nil
 	default:
 		return fmt.Errorf("invalid status code %d from resource %s for method Create", response.StatusCode(), res.name)
